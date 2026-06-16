@@ -1,14 +1,51 @@
 # TriLite.jl
 
-Pure-Julia CPU inference engine for BitNet b1.58 ternary LLMs.
+**Pure-Julia CPU inference engine for BitNet b1.58 ternary LLMs.**
+
+TriLite lets you run BitNet b1.58 models — large language models with {-1, 0, +1} ternary weights — on any CPU, with zero C/C++ dependencies. Built entirely in Julia. Targets Llama-class architectures (GQA, RoPE, SwiGLU, RMSNorm).
+
+---
+
+### What is BitNet b1.58?
+
+BitNet b1.58 is a **ternary LLM architecture** by Microsoft Research where every weight is constrained to one of three values: **-1, 0, or +1** (1.58 bits per parameter on average). This replaces the standard FP16/BF16 weights used in models like Llama or GPT.
+
+**Why it matters:**
+- **Memory**: A 2B-parameter model fits in ~400 MB (vs ~4 GB for FP16)
+- **Compute**: Multiply-accumulate becomes integer addition — no floating-point multipliers
+- **Energy**: ASIC estimates show 10–100× power reduction over FP16 matmul
+- **Quality**: Matches full-precision perplexity at the same parameter count
+
+Ternary quantization is not just for inference — the model is *trained from scratch* at b1.58 precision, unlike post-training quantization approaches.
+
+---
+
+### The Julia Implementation
+
+Most BitNet inference engines (microsoft/BitNet, llama.cpp) are written in C++. TriLite is a **pure-Julia reimplementation** with three kernel backends:
+
+| Kernel | Mechanism | When to use |
+|--------|-----------|-------------|
+| **Reference** | Scalar `Int8 × Float32` | Correctness baseline |
+| **MAD** | `vpmaddubsw` SIMD pairs | Prefill (compute-bound) |
+| **LUT** | `pshufb` table lookup | Decode (memory-bound) |
+
+The engine is **dispatch-based**: a single `matmul!(DEFAULT_KERNEL, ...)` call selects the optimal kernel at compile time via Julia's trait dispatch. No runtime branching.
+
+Other implementation details:
+- GGUF v3 model loader with `tensor_map` for O(1) tensor lookup
+- GPT-2 BPE tokenizer extracted directly from GGUF metadata (no separate file needed)
+- RoPE, RMSNorm, ReLU² activation, group-query attention — all in pure Julia
+- Platform dispatch via `Sys.ARCH` — x86_64 (AVX2) and aarch64 (NEON) intrinsics
 
 ## Features
 
-- **Pure Julia**: No C/C++ FFI required
-- **CPU-only**: Optimized for x86-64 (AVX2) and ARM64 (NEON)
-- **Fast inference**: Targets 20+ tok/s on 2B models
-- **Memory efficient**: ~1GB RAM for 2B model
-- **Multiple kernels**: Reference, MAD, and LUT implementations
+- **Pure Julia**: Zero C/C++ FFI — compiles with the Julia JIT
+- **CPU-only**: No GPU required. x86-64 (AVX2) and ARM64 (NEON)
+- **Ternary weights**: Uses 2-bit GGUF format (GGML dtype 36)
+- **Chat interface**: `chat(model)` for interactive generation
+- **GGUF v3**: Loads standard BitNet GGUF files from HuggingFace
+- **Internal tokenizer**: GPT-2 BPE extracted from GGUF metadata
 
 ## Quick Start
 
@@ -72,6 +109,7 @@ TriLite.jl/
 │   │   └── fallback.jl    # Scalar fallback
 │   ├── kernels/
 │   │   ├── utils.jl       # Kernel utilities
+│   │   ├── dispatch.jl    # Trait-based kernel dispatch
 │   │   ├── matmul_ref.jl  # Reference kernel
 │   │   ├── matmul_mad.jl  # MAD kernel
 │   │   └── matmul_lut.jl  # LUT kernel
@@ -109,19 +147,13 @@ Best for: Decode phase (memory-bound).
 
 ## Performance
 
-Target performance on modern CPUs:
-
-| Model | Size | 2B Model | 8B Model |
-|-------|------|----------|----------|
-| Prefill | - | 20+ tok/s | 5+ tok/s |
-| Decode | - | 20+ tok/s | 5+ tok/s |
-| Memory | - | ~1GB | ~4GB |
+Currently uses the reference (scalar) kernel by default — **~0.015 tok/s on a 30-layer model** (~1 min per token). The MAD and LUT SIMD kernels are implemented and tested but need activation quantization wired into the model pipeline for a ~50–100× speedup. Contributions welcome.
 
 ## Testing
 
 ```bash
 cd TriLite.jl
-julia --project test/runtests.jl
+julia --project=. test/runtests.jl
 ```
 
 ## License
