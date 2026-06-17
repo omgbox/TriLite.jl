@@ -25,7 +25,7 @@ Pre-compute LUT tables from weight matrix.
 """
 function build_lut_tables!(W::AbstractMatrix{Int8}, x_ref::AbstractVector{Float32},
                            scale::Float32)
-    out_features, in_features = size(W)
+    in_features, out_features = size(W)
     num_groups = cld(in_features, LUT_GROUP_SIZE)
     tables = Vector{SIMD.Vec{16,UInt8}}(undef, out_features)
 
@@ -33,9 +33,9 @@ function build_lut_tables!(W::AbstractMatrix{Int8}, x_ref::AbstractVector{Float3
         table = zeros(UInt8, LUT_NUM_PATTERNS)
         for g in 1:min(num_groups, 16)
             base_idx = (g - 1) * LUT_GROUP_SIZE + 1
-            w0 = base_idx <= in_features ? W[row, base_idx] : Int8(0)
-            w1 = base_idx + 1 <= in_features ? W[row, base_idx + 1] : Int8(0)
-            w2 = base_idx + 2 <= in_features ? W[row, base_idx + 2] : Int8(0)
+            w0 = base_idx <= in_features ? W[base_idx, row] : Int8(0)
+            w1 = base_idx + 1 <= in_features ? W[base_idx + 1, row] : Int8(0)
+            w2 = base_idx + 2 <= in_features ? W[base_idx + 2, row] : Int8(0)
 
             for pattern in 0:(LUT_NUM_PATTERNS - 1)
                 x0 = _decode_ternary(pattern, 0)

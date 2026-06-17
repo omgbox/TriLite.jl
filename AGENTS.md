@@ -22,7 +22,13 @@ Every command below assumes CWD is the repo root and `--project=.` is passed unl
 - `src/BitNet.jl:22-31` includes the correct intrinsics module
 - `src/types.jl:140-146` selects default kernel trait
 
-**Kernel dispatch** uses trait types (`RefKernel`, `MADKernel`, `LUTKernel`). The model now calls `matmul!(DEFAULT_KERNEL, ...)` / `matmul_vec!(DEFAULT_KERNEL, ...)` instead of hardcoded `matmul_ref!`. See `src/kernels/dispatch.jl`. Default: `RefKernel()` on all platforms (MAD/LUT need activation quantization).
+**Kernel dispatch** uses trait types (`RefKernel`, `MADKernel`, `LUTKernel`). The model calls `matmul!(DEFAULT_KERNEL, ...)` / `matmul_vec!(DEFAULT_KERNEL, ...)`. See `src/kernels/dispatch.jl`. Default: `MADKernel()` on x86_64, `RefKernel()` elsewhere.
+
+**Activation quantization** is wired into the model pipeline (attention & FFN, prefill & decode). After each RMSNorm, activations are absmean-quantized to Int8 {-1,0,1} with per-tensor scale, then converted to Float32 for matmul. The scale is folded: `combined = weight_scale * act_scale`.
+
+**MAD kernel sign handling:** Uses `vpmaddubsw`-style multiply-add-pairs with encoding trick: `x_enc = x + 1` (maps -1→0, 0→1, 1→2), then `result = vpmaddubsw(x_enc, w) - pair_sum(w)`. This correctly handles ternary × ternary with both signs.
+
+**Weight layout:** All ternary weight matrices stored transposed as `(in_features, out_features)` for contiguous memory access in the inner loop (`W[k, row]` with `k` as inner index). Transposed at load time in `_load_bitlinear`.
 
 **GGUF I2_S support:** Ternary weights packed in 2-bit format (GGML dtype 36). See `src/gguf/` for loaders, `src/gguf/repack.jl` for the unpack → Int8[-1,0,1] path.
 
@@ -74,8 +80,8 @@ The `examples/example.jl` uses `push!(LOAD_PATH, ...)` instead of `using Pkg; Pk
 ### load_model is slow (~460s, 100 GiB alloc)
 On the small committed model (`models/ggml-model-i2_s.gguf`), `load_model()` takes ~460s and allocates ~100 GiB. The O(n²) tensor name lookup has been fixed with a `tensor_map` Dict (`src/gguf/loader.jl`), but per-layer loading still allocates heavily for each weight tensor. Progress is printed per layer. Not a hang — just pathologically slow.
 
-### Cross-platform kernel bug
-`matmul_mad.jl` and `matmul_lut.jl` hardcode `Intrinsics_x86_64.multiply_add_pairs_256` / `Intrinsics_x86_64.pshufb_128`. These will throw `UndefVarError` if called on aarch64 or fallback platforms, despite trait dispatch selecting the correct kernel. Fix: make kernel files generic or gate the hardcoded references.
+### Cross-platform kernel dispatch
+`matmul_mad.jl` and `matmul_lut.jl` reference `Intrinsics_x86_64.*` directly (not via dispatch). These will throw `UndefVarError` on aarch64/fallback. Trait dispatch in `dispatch.jl` ensures they're only called on x86_64 (since `MADKernel()` is the default only on x86_64). If running on aarch64, the code is not reachable, but the source files are still parsed. A future fix could gate the hardcoded intrinsics references or provide arm64-native SIMD paths.
 
 ## Fixed Bugs (Applied)
 
@@ -93,6 +99,9 @@ On the small committed model (`models/ggml-model-i2_s.gguf`), `load_model()` tak
 | LUT table BoundsError | `src/kernels/matmul_lut.jl:45` | table was 16 elements but accessed at index 27 (27 patterns) |
 | `tok_embeddings[:, token]` wrong dimension | `src/transformer/model.jl:63` | Embedding matrix is `(vocab_size, hidden_dim)`; needs `[token, :]` |
 | Kernel dispatch never wired up | `src/kernels/dispatch.jl` (new), `attention.jl`, `ffn.jl` | Model hardcoded `matmul_ref!`; now dispatches via `DEFAULT_KERNEL` trait |
+| MAD kernel sign handling incorrect | `src/kernels/matmul_mad.jl` | `UInt8(abs(x))` lost sign; fixed with encoding trick `x_enc = x+1, result -= pair_sum(w)` |
+| Weight access pattern cache-inefficient | `src/kernels/matmul_ref.jl`, `io.jl` | Inner loop accessed `W[row,k]` strided; transposed to `W_T[k,row]` contiguous |
+| BPE merge loop O(n×merges) | `src/gguf/tokenizer.jl` | Replaced with binary min-heap priority queue O(n log n) |
 | Tensor lookup O(n²) linear scan | `src/gguf/loader.jl:81` | Added `tensor_map::Dict` built once at load time |
 | Tokenizer not loaded from GGUF | `src/io.jl:183` | `_load_tokenizer` now reads 128k vocab + 280k merges from GGUF metadata |
 | No load progress indicator | `src/io.jl:38-59` | Added per-layer timing and progress % during `load_model` |

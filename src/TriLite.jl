@@ -59,5 +59,6 @@ export apply_rope!, apply_rope_single!, rmsnorm!, rmsnorm, softmax!, softmax_vec
 export greedy_sample, topk_sample, topp_sample, sample_token
 export relu_squared, absmean_quantize, matmul_ref!, matmul_ref_vec!
 export load_gguf, load_tensor, load_tensor_i8, extract_config
+export encode_tokenizer, decode_tokenizer, BitTokenizer
 
 end # module TriLite

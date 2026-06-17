@@ -67,6 +67,8 @@ mutable struct BitTokenizer
     vocab::Dict{String,Int}
     vocab_r::Dict{Int,String}
     merges::Vector{Tuple{Int,Int}}
+    merge_map::Dict{Tuple{Int,Int},Int}  # (left_id, right_id) -> merged_id
+    merge_rank::Dict{Tuple{Int,Int},Int} # (left_id, right_id) -> rank
     special_tokens::Dict{String,Int}
     bos_token::Int
     eos_token::Int
@@ -77,7 +79,19 @@ function BitTokenizer(vocab::Dict{String,Int}, merges::Vector{Tuple{Int,Int}},
     vocab_r = Dict(v => k for (k, v) in vocab)
     bos = get(special_tokens, "<|begin_of_text|>", 1)
     eos = get(special_tokens, "<|end_of_text|>", 2)
-    return BitTokenizer(vocab, vocab_r, merges, special_tokens, bos, eos)
+
+    merge_map = Dict{Tuple{Int,Int},Int}()
+    merge_rank = Dict{Tuple{Int,Int},Int}()
+    for (i, (id0, id1)) in enumerate(merges)
+        pair = (id0, id1)
+        merged_str = vocab_r[id0] * vocab_r[id1]
+        merged_id = get(vocab, merged_str, length(vocab))
+        merge_map[pair] = merged_id
+        merge_rank[pair] = i
+    end
+
+    return BitTokenizer(vocab, vocab_r, merges, merge_map, merge_rank,
+                        special_tokens, bos, eos)
 end
 
 # ─── Transformer Layer ────────────────────────────────────────────────
@@ -138,9 +152,9 @@ struct LUTKernel <: KernelType end
 
 # Default kernel selection based on platform
 const DEFAULT_KERNEL = @static if ARCH == :x86_64
-    RefKernel()    # x86: MAD/LUT need activation quantization — use Ref for correctness
+    MADKernel()    # x86: MAD with SIMD multiply-add pairs
 elseif ARCH == :aarch64
-    RefKernel()    # ARM: same issue
+    RefKernel()    # ARM: reference kernel
 else
     RefKernel()    # Fallback: scalar reference
 end

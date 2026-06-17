@@ -81,9 +81,11 @@ function generate(model::BitNetModel, prompt::String;
                   stop_tokens::Vector{String}=["<|end_of_text|>"])
     tokens = encode_tokenizer(prompt, model.tokenizer, add_bos=true)
     println("Input tokens: $(length(tokens))")
+    vocab_size = model.config.vocab_size
 
-    logits = zeros(Float32, model.config.vocab_size)
-    bitnet_forward!(reshape(logits, :, 1), model, tokens, 0)
+    logits_mat = zeros(Float32, vocab_size, length(tokens))
+    bitnet_forward!(logits_mat, model, tokens, 0)
+    logits = logits_mat[:, end]
 
     next_token = sample_token(logits, temperature=temperature, top_k=top_k, top_p=top_p)
     generated_tokens = Int[next_token]
@@ -143,24 +145,23 @@ end
 function _load_bitlinear(gguf, name, config)
     tensor_info = get(gguf.tensor_map, name, nothing)
     if tensor_info !== nothing && tensor_info.dtype == 36
-        # I2_S tensor: load directly as Int8 ternary (fast path)
         weights_i8 = load_tensor_i8(gguf, name)
-        # Compute absmean scale from ternary values
         sum_abs = Int32(0)
         for w in weights_i8
             sum_abs += abs(Int32(w))
         end
         scale = Float32(sum_abs) / Float32(length(weights_i8)) + Float32(1e-6)
-        shape = size(weights_i8)
-        return BitLinear(vec(weights_i8), shape, scale, nothing)
+        out_f, in_f = size(weights_i8)
+        weights_T = permutedims(weights_i8, (2, 1))
+        return BitLinear(vec(weights_T), (in_f, out_f), scale, nothing)
     else
-        # Float16/F32 tensor: load and quantize
         weights = load_tensor(gguf, name)
         weights_f32 = Float32.(vec(weights))
         ternary = absmean_quantize(weights_f32)
         scale = Float32(mean(abs.(weights_f32)))
-        shape = size(weights)
-        return BitLinear(ternary, shape, scale, nothing)
+        out_f, in_f = size(weights)
+        weights_T = permutedims(reshape(ternary, out_f, in_f), (2, 1))
+        return BitLinear(vec(weights_T), (in_f, out_f), scale, nothing)
     end
 end
 
@@ -199,10 +200,22 @@ function _load_tokenizer(path, metadata)
         special = Dict{String,Int}()
         bos = Int(get(metadata, "tokenizer.ggml.bos_token_id", 1))
         eos = Int(get(metadata, "tokenizer.ggml.eos_token_id", 2))
-        return BitTokenizer(vocab, vocab_r, merges, special, bos, eos)
+        # Build merge lookup tables
+        merge_map = Dict{Tuple{Int,Int},Int}()
+        merge_rank = Dict{Tuple{Int,Int},Int}()
+        for (i, (id0, id1)) in enumerate(merges)
+            pair = (id0, id1)
+            merged_str = vocab_r[id0] * vocab_r[id1]
+            merged_id = get(vocab, merged_str, length(vocab))
+            merge_map[pair] = merged_id
+            merge_rank[pair] = i
+        end
+        return BitTokenizer(vocab, vocab_r, merges, merge_map, merge_rank, special, bos, eos)
     end
     @warn "Tokenizer not found in GGUF metadata, using minimal tokenizer"
     vocab = Dict{String,Int}("<unk>" => 0, "<s>" => 1, "</s>" => 2)
-    return BitTokenizer(vocab, Dict{Int,String}(0 => "<unk>", 1 => "<s>", 2 => "</s>"),
-        Tuple{Int,Int}[], Dict{String,Int}(), 1, 2)
+    vocab_r = Dict{Int,String}(0 => "<unk>", 1 => "<s>", 2 => "</s>")
+    return BitTokenizer(vocab, vocab_r, Tuple{Int,Int}[],
+        Dict{Tuple{Int,Int},Int}(), Dict{Tuple{Int,Int},Int}(),
+        Dict{String,Int}(), 1, 2)
 end

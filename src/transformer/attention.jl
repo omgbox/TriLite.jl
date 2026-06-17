@@ -19,12 +19,20 @@ function attention!(out::AbstractMatrix{Float32},
         rmsnorm!(view(h_normed, :, col), view(h, :, col), att_norm_weight, norm_eps)
     end
 
+    sum_abs = sum(abs, h_normed)
+    act_scale = sum_abs / length(h_normed) + Float32(1e-6)
+    h_q = Int8.(clamp.(round.(h_normed ./ act_scale), -1, 1))
+    h_q_f32 = Float32.(h_q)
+    cs_q = wq.scale * act_scale
+    cs_k = wk.scale * act_scale
+    cs_v = wv.scale * act_scale
+
     q = zeros(Float32, hidden_dim, seq_len)
     k = zeros(Float32, kv_dim, seq_len)
     v = zeros(Float32, kv_dim, seq_len)
-    matmul!(DEFAULT_KERNEL, q, _unpack_ternary(wq), h_normed, wq.scale)
-    matmul!(DEFAULT_KERNEL, k, _unpack_ternary(wk), h_normed, wk.scale)
-    matmul!(DEFAULT_KERNEL, v, _unpack_ternary(wv), h_normed, wv.scale)
+    matmul!(DEFAULT_KERNEL, q, _unpack_ternary(wq), h_q_f32, cs_q)
+    matmul!(DEFAULT_KERNEL, k, _unpack_ternary(wk), h_q_f32, cs_k)
+    matmul!(DEFAULT_KERNEL, v, _unpack_ternary(wv), h_q_f32, cs_v)
 
     for t in 1:seq_len
         for h in 1:num_heads
@@ -46,7 +54,12 @@ function attention!(out::AbstractMatrix{Float32},
     end
 
     att_out = _compute_attention(q, k, v, num_heads, num_kv_heads, head_dim, seq_len)
-    matmul!(DEFAULT_KERNEL, out, _unpack_ternary(wo), att_out, wo.scale)
+
+    att_sum = sum(abs, att_out)
+    att_scale = att_sum / length(att_out) + Float32(1e-6)
+    att_q = Int8.(clamp.(round.(att_out ./ att_scale), -1, 1))
+    att_q_f32 = Float32.(att_q)
+    matmul!(DEFAULT_KERNEL, out, _unpack_ternary(wo), att_q_f32, wo.scale * att_scale)
     return out
 end
 
@@ -64,12 +77,18 @@ function attention_decode!(out::AbstractVector{Float32},
     h_normed = similar(h)
     rmsnorm!(h_normed, h, att_norm_weight, norm_eps)
 
+    sum_abs = sum(abs, h_normed)
+    act_scale = sum_abs / length(h_normed) + Float32(1e-6)
+    h_q = Int8.(clamp.(round.(h_normed ./ act_scale), -1, 1))
+    h_q_f32 = Float32.(h_q)
+    cs = wq.scale * act_scale
+
     q = zeros(Float32, hidden_dim)
     k = zeros(Float32, kv_dim)
     v = zeros(Float32, kv_dim)
-    matmul_vec!(DEFAULT_KERNEL, q, _unpack_ternary(wq), h_normed, wq.scale)
-    matmul_vec!(DEFAULT_KERNEL, k, _unpack_ternary(wk), h_normed, wk.scale)
-    matmul_vec!(DEFAULT_KERNEL, v, _unpack_ternary(wv), h_normed, wv.scale)
+    matmul_vec!(DEFAULT_KERNEL, q, _unpack_ternary(wq), h_q_f32, cs)
+    matmul_vec!(DEFAULT_KERNEL, k, _unpack_ternary(wk), h_q_f32, cs)
+    matmul_vec!(DEFAULT_KERNEL, v, _unpack_ternary(wv), h_q_f32, cs)
 
     for h in 1:num_heads
         offset = (h - 1) * head_dim
@@ -87,7 +106,12 @@ function attention_decode!(out::AbstractVector{Float32},
     end
 
     att_out = _compute_attention_decode(q, cache, layer_idx, num_heads, num_kv_heads, head_dim, pos)
-    matmul_vec!(DEFAULT_KERNEL, out, _unpack_ternary(wo), att_out, wo.scale)
+
+    att_sum = sum(abs, att_out)
+    att_scale = att_sum / length(att_out) + Float32(1e-6)
+    att_q = Int8.(clamp.(round.(att_out ./ att_scale), -1, 1))
+    att_q_f32 = Float32.(att_q)
+    matmul_vec!(DEFAULT_KERNEL, out, _unpack_ternary(wo), att_q_f32, wo.scale * att_scale)
     return out
 end
 

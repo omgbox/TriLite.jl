@@ -35,6 +35,23 @@ end
     return cld(n, multiple) * multiple
 end
 
+# ─── Activation Quantization ─────────────────────────────────────────
+
+@inline function absmean_quantize_act!(out::AbstractVector{Int8}, x::AbstractVector{Float32})
+    epsilon = Float32(1e-6)
+    sum_abs = Float32(0.0)
+    for i in eachindex(x)
+        sum_abs += abs(x[i])
+    end
+    scale = sum_abs / length(x) + epsilon
+    inv_scale = 1.0f0 / scale
+    for i in eachindex(x)
+        scaled = x[i] * inv_scale
+        out[i] = Int8(clamp(round(scaled), -1, 1))
+    end
+    return scale
+end
+
 # ─── Activation Function ─────────────────────────────────────────────
 
 @inline function relu_squared(x::Float32)

@@ -87,11 +87,11 @@ include("../src/kernels/matmul_lut.jl")
             in_features = 8
             seq_len = 2
 
-            # Ternary weights
-            W = Int8[-1 0 1 -1 0 1 -1 0;
-                      0 1 -1 0 1 -1 0 1;
-                      1 -1 0 1 -1 0 1 -1;
-                      -1 0 1 -1 0 1 -1 0]
+            # Ternary weights (transposed for contiguous access)
+            W = permutedims(Int8[-1 0 1 -1 0 1 -1 0;
+                                  0 1 -1 0 1 -1 0 1;
+                                  1 -1 0 1 -1 0 1 -1;
+                                  -1 0 1 -1 0 1 -1 0], (2, 1))
 
             # Activations
             x = Float32[1.0 2.0;
@@ -122,10 +122,10 @@ include("../src/kernels/matmul_lut.jl")
             out_features = 4
             in_features = 8
 
-            W = Int8[-1 0 1 -1 0 1 -1 0;
-                      0 1 -1 0 1 -1 0 1;
-                      1 -1 0 1 -1 0 1 -1;
-                      -1 0 1 -1 0 1 -1 0]
+            W = permutedims(Int8[-1 0 1 -1 0 1 -1 0;
+                                  0 1 -1 0 1 -1 0 1;
+                                  1 -1 0 1 -1 0 1 -1;
+                                  -1 0 1 -1 0 1 -1 0], (2, 1))
 
             x = Float32[1.0, 3.0, 5.0, 7.0, 9.0, 11.0, 13.0, 15.0]
             scale = 1.0f0
@@ -139,13 +139,13 @@ include("../src/kernels/matmul_lut.jl")
 
     @testset "MAD Kernel" begin
         @testset "matmul_mad!" begin
-            # Same test as reference
-            out_features = 32  # Multiple of SIMD width
+            # Test with full ternary {-1,0,1} activations (tests sign handling)
+            out_features = 32
             in_features = 32
             seq_len = 1
 
-            W = Int8.(rand(-1:1, out_features, in_features))
-            x = Float32.(rand(0:1, in_features, seq_len))
+            W = permutedims(Int8.(rand(-1:1, out_features, in_features)), (2, 1))
+            x = Float32.(rand(-1:1, in_features, seq_len))
 
             scale = 1.0f0
             out_ref = zeros(Float32, out_features, seq_len)
@@ -166,9 +166,9 @@ include("../src/kernels/matmul_lut.jl")
         @testset "matmul_lut!" begin
             # Build LUT tables
             out_features = 16
-            in_features = 48  # Multiple of 3 (group_size)
+            in_features = 48
 
-            W = Int8.(rand(-1:1, out_features, in_features))
+            W = permutedims(Int8.(rand(-1:1, out_features, in_features)), (2, 1))
             x = Float32.(rand(0:1, in_features, 1))
 
             scale = 1.0f0
@@ -195,8 +195,8 @@ include("../src/kernels/matmul_lut.jl")
             in_features = 64
             seq_len = 1
 
-            W = Int8.(rand(-1:1, out_features, in_features))
-            x = Float32.(rand(0:1, in_features, seq_len))
+            W = permutedims(Int8.(rand(-1:1, out_features, in_features)), (2, 1))
+            x = Float32.(rand(-1:1, in_features, seq_len))
             scale = 0.1f0
 
             out_ref = zeros(Float32, out_features, seq_len)

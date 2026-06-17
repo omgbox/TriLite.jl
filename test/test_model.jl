@@ -83,13 +83,14 @@ using TriLite
         kv_dim = num_kv_heads * head_dim
         layers = TransformerLayer[]
         for _ in 1:num_layers
-            wq = BitLinear(vec(rand(Int8, hidden_dim, hidden_dim)), (hidden_dim, hidden_dim), 0.1f0, nothing)
-            wk = BitLinear(vec(rand(Int8, kv_dim, hidden_dim)), (kv_dim, hidden_dim), 0.1f0, nothing)
-            wv = BitLinear(vec(rand(Int8, kv_dim, hidden_dim)), (kv_dim, hidden_dim), 0.1f0, nothing)
-            wo = BitLinear(vec(rand(Int8, hidden_dim, hidden_dim)), (hidden_dim, hidden_dim), 0.1f0, nothing)
-            w_gate = BitLinear(vec(rand(Int8, ffn_dim, hidden_dim)), (ffn_dim, hidden_dim), 0.1f0, nothing)
-            w_up = BitLinear(vec(rand(Int8, ffn_dim, hidden_dim)), (ffn_dim, hidden_dim), 0.1f0, nothing)
-            w_down = BitLinear(vec(rand(Int8, hidden_dim, ffn_dim)), (hidden_dim, ffn_dim), 0.1f0, nothing)
+            # Weights stored transposed (in_features × out_features) for contiguous access
+            wq = BitLinear(vec(permutedims(rand(Int8, hidden_dim, hidden_dim), (2, 1))), (hidden_dim, hidden_dim), 0.1f0, nothing)
+            wk = BitLinear(vec(permutedims(rand(Int8, kv_dim, hidden_dim), (2, 1))), (hidden_dim, kv_dim), 0.1f0, nothing)
+            wv = BitLinear(vec(permutedims(rand(Int8, kv_dim, hidden_dim), (2, 1))), (hidden_dim, kv_dim), 0.1f0, nothing)
+            wo = BitLinear(vec(permutedims(rand(Int8, hidden_dim, hidden_dim), (2, 1))), (hidden_dim, hidden_dim), 0.1f0, nothing)
+            w_gate = BitLinear(vec(permutedims(rand(Int8, ffn_dim, hidden_dim), (2, 1))), (hidden_dim, ffn_dim), 0.1f0, nothing)
+            w_up = BitLinear(vec(permutedims(rand(Int8, ffn_dim, hidden_dim), (2, 1))), (hidden_dim, ffn_dim), 0.1f0, nothing)
+            w_down = BitLinear(vec(permutedims(rand(Int8, hidden_dim, ffn_dim), (2, 1))), (ffn_dim, hidden_dim), 0.1f0, nothing)
             att_norm = ones(Float32, hidden_dim)
             ffn_norm = ones(Float32, hidden_dim)
             push!(layers, TransformerLayer(wq, wk, wv, wo, w_gate, w_up, w_down, att_norm, ffn_norm))
@@ -126,13 +127,13 @@ using TriLite
         kv_dim = num_kv_heads * head_dim
         layers = TransformerLayer[]
         for _ in 1:num_layers
-            wq = BitLinear(vec(rand(Int8, hidden_dim, hidden_dim)), (hidden_dim, hidden_dim), 0.1f0, nothing)
-            wk = BitLinear(vec(rand(Int8, kv_dim, hidden_dim)), (kv_dim, hidden_dim), 0.1f0, nothing)
-            wv = BitLinear(vec(rand(Int8, kv_dim, hidden_dim)), (kv_dim, hidden_dim), 0.1f0, nothing)
-            wo = BitLinear(vec(rand(Int8, hidden_dim, hidden_dim)), (hidden_dim, hidden_dim), 0.1f0, nothing)
-            w_gate = BitLinear(vec(rand(Int8, ffn_dim, hidden_dim)), (ffn_dim, hidden_dim), 0.1f0, nothing)
-            w_up = BitLinear(vec(rand(Int8, ffn_dim, hidden_dim)), (ffn_dim, hidden_dim), 0.1f0, nothing)
-            w_down = BitLinear(vec(rand(Int8, hidden_dim, ffn_dim)), (hidden_dim, ffn_dim), 0.1f0, nothing)
+            wq = BitLinear(vec(permutedims(rand(Int8, hidden_dim, hidden_dim), (2, 1))), (hidden_dim, hidden_dim), 0.1f0, nothing)
+            wk = BitLinear(vec(permutedims(rand(Int8, kv_dim, hidden_dim), (2, 1))), (hidden_dim, kv_dim), 0.1f0, nothing)
+            wv = BitLinear(vec(permutedims(rand(Int8, kv_dim, hidden_dim), (2, 1))), (hidden_dim, kv_dim), 0.1f0, nothing)
+            wo = BitLinear(vec(permutedims(rand(Int8, hidden_dim, hidden_dim), (2, 1))), (hidden_dim, hidden_dim), 0.1f0, nothing)
+            w_gate = BitLinear(vec(permutedims(rand(Int8, ffn_dim, hidden_dim), (2, 1))), (hidden_dim, ffn_dim), 0.1f0, nothing)
+            w_up = BitLinear(vec(permutedims(rand(Int8, ffn_dim, hidden_dim), (2, 1))), (hidden_dim, ffn_dim), 0.1f0, nothing)
+            w_down = BitLinear(vec(permutedims(rand(Int8, hidden_dim, ffn_dim), (2, 1))), (ffn_dim, hidden_dim), 0.1f0, nothing)
             att_norm = ones(Float32, hidden_dim)
             ffn_norm = ones(Float32, hidden_dim)
             push!(layers, TransformerLayer(wq, wk, wv, wo, w_gate, w_up, w_down, att_norm, ffn_norm))
